@@ -54,41 +54,56 @@ def extrair_noticia(url):
     try:
         r = requests.get(url, headers=headers, timeout=15)
         soup = BeautifulSoup(r.text, "html.parser")
+        # Titulo
         titulo = soup.find("h1")
         titulo = titulo.get_text(strip=True) if titulo else ""
+        # Texto
         paragrafos = [p.get_text(strip=True) for p in soup.find_all("p") if len(p.get_text(strip=True)) > 50]
         texto = " ".join(paragrafos[:30])
+        # Fotos - prioridade: og:image e twitter:image (foto principal da materia)
         fotos = []
-        for tag in soup.find_all(["img","meta"]):
-            src = tag.get("src") or tag.get("content","")
-            if src and src.startswith("http") and any(x in src for x in [".jpg",".jpeg",".png",".webp"]):
-                if not any(x in src.lower() for x in ["logo","icon","avatar","banner","thumb_small"]):
-                    if src not in fotos:
-                        fotos.append(src)
+        # 1. og:image - sempre a foto principal
+        og = soup.find("meta", property="og:image")
+        if og and og.get("content","").startswith("http"):
+            fotos.append(og["content"])
+        # 2. twitter:image
+        tw = soup.find("meta", attrs={"name": "twitter:image"})
+        if tw and tw.get("content","").startswith("http") and tw["content"] not in fotos:
+            fotos.append(tw["content"])
+        # 3. Imagens do artigo principal (dentro de article ou .content, evitando sidebars)
+        article = soup.find("article") or soup.find(class_=re.compile(r"content|article|post|materia|noticia", re.I))
+        if article:
+            for img in article.find_all("img"):
+                src = img.get("src","") or img.get("data-src","") or img.get("data-lazy-src","")
+                if src and src.startswith("http") and any(x in src for x in [".jpg",".jpeg",".png",".webp"]):
+                    if not any(x in src.lower() for x in ["logo","icon","avatar","1x1","pixel","tracking","ad","banner","thumb_small","related","mais-lidas","sidebar"]):
+                        if src not in fotos:
+                            fotos.append(src)
         dominio = urlparse(url).netloc.replace("www.","")
-        return {"titulo": titulo, "texto": texto, "fotos": fotos[:6], "dominio": dominio, "url": url}
+        return {"titulo": titulo, "texto": texto, "fotos": fotos[:5], "dominio": dominio, "url": url}
     except Exception as e:
         return {"titulo": "", "texto": "", "fotos": [], "dominio": "", "url": url, "erro": str(e)}
 def estruturar_carrossel(dados):
+    fotos_str = json.dumps(dados["fotos"])
     prompt = f"""Voce e um editor de conteudo para o Instagram de uma assessoria de imprensa chamada Bpmat.
 Analise a noticia abaixo e crie um carrossel de 3 a 5 slides para o Instagram.
 
 REGRAS OBRIGATORIAS:
-1. nome_artista: nome principal em MAIUSCULAS, extraido da noticia (NUNCA use placeholder)
-2. veiculo: mapeie o dominio {dados["dominio"]} para nome legivel (ex: g1.globo.com->G1, oglobo.com->O Globo)
+1. nome_artista: nome principal em MAIUSCULAS, extraido EXCLUSIVAMENTE da noticia fornecida
+2. veiculo: mapeie o dominio {dados["dominio"]} para nome legivel (ex: g1.globo.com->G1, oglobo.com->O Globo, uol.com.br->UOL, folha.uol.com.br->Folha, estadao.com.br->Estadao)
 3. tipo_slide: exatamente "capa" | "interno" | "encerramento"
 4. titulo_slide: max 10 palavras, SEM aspas de qualquer tipo, em MAIUSCULAS
-5. texto_slide: 2-3 frases informativas curtas, diferentes por slide
-6. foto_url: use fotos diferentes por slide quando houver varias disponiveis
-7. Ultimo slide: tipo="encerramento", titulo="CONFIRA A MATERIA COMPLETA EM [VEICULO]"
+5. texto_slide: 2-3 frases informativas curtas, diferentes por slide, baseadas na noticia
+6. foto_url: use APENAS as URLs da lista FOTOS DISPONIVEIS abaixo, distribuindo fotos diferentes por slide
+7. Ultimo slide sempre: tipo="encerramento", titulo="CONFIRA A MATERIA COMPLETA EM [VEICULO]"
 8. Distribua a narrativa: contexto -> desenvolvimento -> CTA
 
-FOTOS DISPONIVEIS: {json.dumps(dados["fotos"])}
+FOTOS DISPONIVEIS (use SOMENTE estas URLs): {fotos_str}
 DOMINIO: {dados["dominio"]}
-TITULO: {dados["titulo"]}
-TEXTO: {dados["texto"][:3000]}
+TITULO DA NOTICIA: {dados["titulo"]}
+TEXTO DA NOTICIA: {dados["texto"][:3000]}
 
-Retorne APENAS JSON valido (sem markdown):
+Retorne APENAS JSON valido sem markdown:
 {{
   "nome_artista": "NOME EM MAIUSCULAS",
   "veiculo": "Nome do Veiculo",
@@ -96,8 +111,8 @@ Retorne APENAS JSON valido (sem markdown):
     {{
       "tipo_slide": "capa",
       "titulo_slide": "TITULO SEM ASPAS",
-      "texto_slide": "Texto informativo do slide.",
-      "foto_url": "https://..."
+      "texto_slide": "Texto informativo.",
+      "foto_url": "url_da_lista_acima"
     }}
   ]
 }}"""
@@ -111,6 +126,7 @@ Retorne APENAS JSON valido (sem markdown):
     raw = r.json()["candidates"][0]["content"]["parts"][0]["text"]
     raw = re.sub(r"```json|```", "", raw).strip()
     return json.loads(raw)
+
 def gerar_slide(slide, nome_artista, veiculo, idx):
     tipo = slide.get("tipo_slide", "interno")
     tmpl = TEMPLATES.get(tipo, TEMPLATES["interno"])
@@ -145,7 +161,7 @@ def gerar_slide(slide, nome_artista, veiculo, idx):
     if not img_url and "outputs" in data:
         img_url = data["outputs"][0].get("url","")
     return img_url
-# ── STREAMLIT UI ─────────────────────────────────────────────────────────────
+# ── UI ──────────────────────────────────────────────────────────────────────
 st.set_page_config(page_title="Gerador de Carrossel - Bpmat", page_icon="v", layout="centered")
 
 st.markdown("""
@@ -166,12 +182,14 @@ if gerar and link:
     with st.spinner("Extraindo noticia..."):
         dados = extrair_noticia(link)
     if not dados.get("titulo") and not dados.get("texto"):
-        st.error("Nao foi possivel extrair o conteudo da noticia. Verifique o link.")
+        st.error("Nao foi possivel extrair o conteudo. Verifique o link.")
         st.stop()
     with st.expander("Noticia extraida", expanded=False):
         st.write(f"Titulo: {dados["titulo"]}")
         st.write(f"Dominio: {dados["dominio"]}")
         st.write(f"Fotos encontradas: {len(dados["fotos"])}")
+        for i, f in enumerate(dados["fotos"]):
+            st.write(f"Foto {i+1}: {f[:80]}...")
     with st.spinner("Estruturando carrossel com Gemini AI..."):
         try:
             estrutura = estruturar_carrossel(dados)
