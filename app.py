@@ -58,17 +58,14 @@ def extrair_noticia(url):
         paragrafos = [p.get_text(strip=True) for p in soup.find_all("p") if len(p.get_text(strip=True)) > 50]
         texto = " ".join(paragrafos[:30])
         fotos = []
-        # Prioridade 1: og:image (sempre a foto principal)
         for prop in ["og:image", "og:image:secure_url"]:
             tag = soup.find("meta", property=prop)
             if tag and tag.get("content","").startswith("http") and tag["content"] not in fotos:
                 fotos.append(tag["content"])
-        # Prioridade 2: twitter:image
         for name in ["twitter:image", "twitter:image:src"]:
             tag = soup.find("meta", attrs={"name": name})
             if tag and tag.get("content","").startswith("http") and tag["content"] not in fotos:
                 fotos.append(tag["content"])
-        # Prioridade 3: imagens grandes dentro do artigo
         SKIP = ["logo","icon","avatar","1x1","pixel","tracking","ad","banner","related","mais-lidas","sidebar","newsletter","social","share","favicon","sprite","placeholder"]
         for img in soup.find_all("img"):
             src = img.get("src","") or img.get("data-src","") or img.get("data-lazy-src","") or img.get("data-original","")
@@ -85,14 +82,15 @@ def extrair_noticia(url):
         return {"titulo": titulo, "texto": texto, "fotos": fotos[:5], "dominio": dominio, "url": url}
     except Exception as e:
         return {"titulo": "", "texto": "", "fotos": [], "dominio": "", "url": url, "erro": str(e)}
+
 def estruturar_carrossel(dados):
     fotos_str = json.dumps(dados["fotos"])
     prompt = f"""Voce e um editor de conteudo para o Instagram de uma assessoria de imprensa chamada Bpmat.
-Analise a noticia abaixo e crie um carrossel de 3 a 5 slides.
+Crie um carrossel de 3 a 5 slides com base na noticia abaixo.
 
 REGRAS:
 1. nome_artista: nome principal em MAIUSCULAS, extraido da noticia
-2. veiculo: nome legivel para o dominio {dados["dominio"]} (g1.globo.com->G1, oglobo.com->O Globo, uol.com.br->UOL, folha.uol.com.br->Folha, estadao.com.br->Estadao, terra.com.br->Terra, r7.com->R7, metropoles.com->Metropoles)
+2. veiculo: nome legivel para {dados["dominio"]} (g1.globo.com->G1, oglobo.com->O Globo, uol.com.br->UOL, folha.uol.com.br->Folha, estadao.com.br->Estadao, terra.com.br->Terra, r7.com->R7, metropoles.com->Metropoles)
 3. tipo_slide: "capa" | "interno" | "encerramento"
 4. titulo_slide: max 10 palavras, SEM aspas, MAIUSCULAS
 5. texto_slide: 2-3 frases informativas, diferentes por slide
@@ -103,7 +101,7 @@ DOMINIO: {dados["dominio"]}
 TITULO: {dados["titulo"]}
 TEXTO: {dados["texto"][:3000]}
 
-Retorne APENAS JSON sem markdown:
+JSON sem markdown:
 {{
   "nome_artista": "NOME",
   "veiculo": "Veiculo",
@@ -122,42 +120,33 @@ Retorne APENAS JSON sem markdown:
     raw = re.sub(r"```json|```", "", raw).strip()
     return json.loads(raw)
 
-def inspecionar_template(tid):
-    """Busca os layers reais do template no Layerre para debug."""
-    r = requests.get(
-        f"https://api.layerre.com/v1/template/{tid}",
-        headers={"Authorization": f"Bearer {LAYERRE_API_KEY}"},
-        timeout=30
-    )
-    if r.ok:
-        return r.json()
-    return {"erro": r.status_code, "body": r.text[:500]}
-
 def gerar_slide(slide, nome_artista, veiculo, idx, debug=False):
     tipo = slide.get("tipo_slide", "interno")
     tmpl = TEMPLATES.get(tipo, TEMPLATES["interno"])
     tid = tmpl["id"]
-    layers_cfg = tmpl["layers"]
+    lc = tmpl["layers"]
     nome_veiculo = f"{nome_artista} + {veiculo}"
     titulo = remover_aspas(slide.get("titulo_slide", ""))
     texto = slide.get("texto_slide", "")
     foto = slide.get("foto_url", "")
     layers = []
-    # Camada de imagem - sem campo "type", apenas id e value (formato Layerre)
+    # IMAGEM: campo correto e "img_url" (descoberto via API do Layerre)
     if foto:
-        layers.append({"id": layers_cfg["foto"], "value": foto})
+        layers.append({"id": lc["foto"], "img_url": foto})
+    # TEXTOS: campo "value"
     if tipo == "capa":
-        layers.append({"id": layers_cfg["nome_artista"], "value": nome_artista})
-        layers.append({"id": layers_cfg["titulo"],       "value": titulo})
-        layers.append({"id": layers_cfg["veiculo"],      "value": veiculo})
-        layers.append({"id": layers_cfg["logo_bpmat"],   "value": "#ImprensaBpmat"})
+        layers.append({"id": lc["nome_artista"], "value": nome_artista})
+        layers.append({"id": lc["titulo"],        "value": titulo})
+        layers.append({"id": lc["veiculo"],       "value": veiculo})
+        layers.append({"id": lc["logo_bpmat"],    "value": "#ImprensaBpmat"})
     else:
-        layers.append({"id": layers_cfg["titulo"],       "value": titulo})
-        layers.append({"id": layers_cfg["texto_slide"],  "value": texto})
-        layers.append({"id": layers_cfg["nome_veiculo"], "value": nome_veiculo})
-        layers.append({"id": layers_cfg["logo_bpmat"],   "value": "#ImprensaBpmat"})
+        layers.append({"id": lc["titulo"],        "value": titulo})
+        layers.append({"id": lc["texto_slide"],   "value": texto})
+        layers.append({"id": lc["nome_veiculo"],  "value": nome_veiculo})
+        layers.append({"id": lc["logo_bpmat"],    "value": "#ImprensaBpmat"})
     payload = {"name": f"slide_{idx:02d}", "layers": layers, "format": "png"}
     if debug:
+        st.write(f"**Payload slide {idx}:**")
         st.json(payload)
     r = requests.post(
         f"https://api.layerre.com/v1/template/{tid}/variant",
@@ -165,14 +154,18 @@ def gerar_slide(slide, nome_artista, veiculo, idx, debug=False):
         json=payload, timeout=60
     )
     if debug:
-        st.write(f"Layerre status: {r.status_code}")
-        st.json(r.json())
+        st.write(f"**Layerre resposta {idx} (status {r.status_code}):**")
+        try:
+            st.json(r.json())
+        except:
+            st.write(r.text[:500])
     r.raise_for_status()
     data = r.json()
     img_url = data.get("url") or data.get("image_url") or data.get("output_url") or ""
     if not img_url and "outputs" in data:
         img_url = data["outputs"][0].get("url","")
     return img_url
+
 # ── UI ──────────────────────────────────────────────────────────────────────
 st.set_page_config(page_title="Gerador de Carrossel - Bpmat", page_icon="v", layout="centered")
 
@@ -187,16 +180,7 @@ if not LAYERRE_API_KEY or not GEMINI_API_KEY:
     st.error("Chaves de API nao configuradas.")
     st.stop()
 
-# Modo debug oculto
 debug_mode = st.sidebar.checkbox("Modo debug (ver payloads)", value=False)
-
-# Inspecao de template (apenas no modo debug)
-if debug_mode:
-    with st.sidebar.expander("Inspecionar template"):
-        tid_inspect = st.selectbox("Template", list(TEMPLATES.keys()))
-        if st.button("Inspecionar"):
-            dados_tmpl = inspecionar_template(TEMPLATES[tid_inspect]["id"])
-            st.json(dados_tmpl)
 
 link = st.text_input("Cole o link da noticia aqui:", placeholder="https://oglobo.globo.com/...")
 gerar = st.button("GERAR CARROSSEL", type="primary", use_container_width=True)
@@ -210,7 +194,7 @@ if gerar and link:
     with st.expander("Noticia extraida", expanded=False):
         st.write(f"Titulo: {dados["titulo"]}")
         st.write(f"Dominio: {dados["dominio"]}")
-        st.write(f"Fotos encontradas: {len(dados["fotos"])}")
+        st.write(f"Fotos: {len(dados["fotos"])}")
         for i, f in enumerate(dados["fotos"]):
             st.write(f"Foto {i+1}: {f[:100]}")
     with st.spinner("Estruturando com Gemini AI..."):
