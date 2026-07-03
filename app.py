@@ -88,7 +88,7 @@ def extrair_noticia(url):
 
 def estruturar_carrossel(dados):
     fotos_str = json.dumps(dados["fotos"])
-    prompt = """Voce e um editor de conteudo para o Instagram de uma assessoria de imprensa chamada Bpmat.
+    prompt = """Voce e um editor de conteudo para o Instagram de uma assessoria de imprensa chamada Bpmcom.
 Crie um carrossel de 3 a 5 slides com base na noticia abaixo.
 REGRAS:
 1. nome_artista: nome principal em MAIUSCULAS, extraido da noticia
@@ -150,12 +150,12 @@ def gerar_slide(slide, nome_artista, veiculo, idx, debug=False):
         overrides.append({"layer_id": lc["nome_artista"], "properties": {"text": nome_artista}})
         overrides.append({"layer_id": lc["titulo"],       "properties": {"text": titulo}})
         overrides.append({"layer_id": lc["veiculo"],      "properties": {"text": veiculo}})
-        overrides.append({"layer_id": lc["logo_bpmat"],   "properties": {"text": "#ImprensaBpmat"}})
+        overrides.append({"layer_id": lc["logo_bpmat"],   "properties": {"text": "#imprensabpmcom"}})
     else:
         overrides.append({"layer_id": lc["titulo"],       "properties": {"text": titulo}})
         overrides.append({"layer_id": lc["texto_slide"],  "properties": {"text": texto}})
         overrides.append({"layer_id": lc["nome_veiculo"], "properties": {"text": nome_veiculo}})
-        overrides.append({"layer_id": lc["logo_bpmat"],   "properties": {"text": "#ImprensaBpmat"}})
+        overrides.append({"layer_id": lc["logo_bpmat"],   "properties": {"text": "#imprensabpmcom"}})
 
     payload = {
         "export_type": "png",
@@ -187,12 +187,12 @@ def gerar_slide(slide, nome_artista, veiculo, idx, debug=False):
 
 # -- UI --
 
-st.set_page_config(page_title="Gerador de Carrossel - Bpmat", page_icon="v", layout="centered")
+st.set_page_config(page_title="Posts da Bpmcom", page_icon="v", layout="centered")
 
 st.markdown("""
 <div style="background:#5B2D8E;padding:24px 20px 18px;border-radius:12px;text-align:center;margin-bottom:8px">
-  <h1 style="color:white;margin:0;font-size:1.8rem;font-weight:700">Gerador de Carrossel</h1>
-  <p style="color:#e0c9ff;margin:6px 0 0;font-size:1rem">Assessoria Bpmat - Automacao de posts para Instagram</p>
+  <h1 style="color:white;margin:0;font-size:1.8rem;font-weight:700">Posts da Bpmcom</h1>
+  <p style="color:#e0c9ff;margin:6px 0 0;font-size:1rem">Assessoria Bpmcom - Automacao de posts para Instagram</p>
 </div>
 """, unsafe_allow_html=True)
 
@@ -265,3 +265,9 @@ if gerar and url_input:
     if imgs:
         st.markdown("---")
         st.info("Clique nos links acima para baixar cada post individualmente.")
+
+      
+        
+      
+      Stop Claude
+    
