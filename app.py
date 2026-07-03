@@ -44,7 +44,7 @@ TEMPLATES = {
 }
 
 def remover_aspas(texto):
-    for c in [chr(0x201c),chr(0x201d),chr(0x2018),chr(0x2019),chr(0x201e),chr(0x00ab),chr(0x00bb),chr(34),chr(39)]:
+    for c in [chr(0x201c), chr(0x201d), chr(0x2018), chr(0x2019), chr(0x201e), chr(0x00ab), chr(0x00bb), chr(34), chr(39)]:
         texto = texto.replace(c, "")
     return texto.strip()
 
@@ -60,47 +60,47 @@ def extrair_noticia(url):
         fotos = []
         for prop in ["og:image", "og:image:secure_url"]:
             tag = soup.find("meta", property=prop)
-            if tag and tag.get("content","").startswith("http") and tag["content"] not in fotos:
+            if tag and tag.get("content", "").startswith("http") and tag["content"] not in fotos:
                 fotos.append(tag["content"])
         for name in ["twitter:image", "twitter:image:src"]:
             tag = soup.find("meta", attrs={"name": name})
-            if tag and tag.get("content","").startswith("http") and tag["content"] not in fotos:
+            if tag and tag.get("content", "").startswith("http") and tag["content"] not in fotos:
                 fotos.append(tag["content"])
-        SKIP = ["logo","icon","avatar","1x1","pixel","tracking","ad","banner","related","mais-lidas","sidebar","newsletter","social","share","favicon","sprite","placeholder"]
+        SKIP = ["logo", "icon", "avatar", "1x1", "pixel", "tracking", "ad", "banner",
+                "related", "mais-lidas", "sidebar", "newsletter", "social", "share",
+                "favicon", "sprite", "placeholder"]
         for img in soup.find_all("img"):
-            src = img.get("src","") or img.get("data-src","") or img.get("data-lazy-src","") or img.get("data-original","")
-            if src and src.startswith("http") and any(x in src for x in [".jpg",".jpeg",".png",".webp"]):
+            src = (img.get("src", "") or img.get("data-src", "") or
+                   img.get("data-lazy-src", "") or img.get("data-original", ""))
+            if src and src.startswith("http") and any(x in src for x in [".jpg", ".jpeg", ".png", ".webp"]):
                 if not any(x in src.lower() for x in SKIP):
-                    w = img.get("width","0")
+                    w = img.get("width", "0")
                     try:
-                        if int(str(w).replace("px","")) > 300 and src not in fotos:
+                        if int(str(w).replace("px", "")) > 300 and src not in fotos:
                             fotos.append(src)
                     except:
                         if src not in fotos:
                             fotos.append(src)
-        dominio = urlparse(url).netloc.replace("www.","")
+        dominio = urlparse(url).netloc.replace("www.", "")
         return {"titulo": titulo, "texto": texto, "fotos": fotos[:5], "dominio": dominio, "url": url}
     except Exception as e:
         return {"titulo": "", "texto": "", "fotos": [], "dominio": "", "url": url, "erro": str(e)}
 
 def estruturar_carrossel(dados):
     fotos_str = json.dumps(dados["fotos"])
-    prompt = f"""Voce e um editor de conteudo para o Instagram de uma assessoria de imprensa chamada Bpmat.
+    prompt = """Voce e um editor de conteudo para o Instagram de uma assessoria de imprensa chamada Bpmat.
 Crie um carrossel de 3 a 5 slides com base na noticia abaixo.
-
 REGRAS:
 1. nome_artista: nome principal em MAIUSCULAS, extraido da noticia
-2. veiculo: nome legivel para {dados["dominio"]} (g1.globo.com->G1, oglobo.com->O Globo, uol.com.br->UOL, folha.uol.com.br->Folha, estadao.com.br->Estadao, terra.com.br->Terra, r7.com->R7, metropoles.com->Metropoles)
+2. veiculo: nome legivel para {dominio} (g1.globo.com->G1, oglobo.com->O Globo, uol.com.br->UOL, folha.uol.com.br->Folha, estadao.com.br->Estadao, terra.com.br->Terra, r7.com->R7, metropoles.com->Metropoles)
 3. tipo_slide: "capa" | "interno" | "encerramento"
 4. titulo_slide: max 10 palavras, SEM aspas, MAIUSCULAS
 5. texto_slide: 2-3 frases informativas, diferentes por slide
-6. foto_url: use SOMENTE URLs desta lista: {fotos_str}
+6. foto_url: use SOMENTE URLs desta lista: {fotos}
 7. Ultimo slide: tipo=encerramento, titulo=CONFIRA A MATERIA COMPLETA EM [VEICULO]
-
-DOMINIO: {dados["dominio"]}
-TITULO: {dados["titulo"]}
-TEXTO: {dados["texto"][:3000]}
-
+DOMINIO: {dominio}
+TITULO: {titulo}
+TEXTO: {texto}
 JSON sem markdown:
 {{
   "nome_artista": "NOME",
@@ -108,7 +108,12 @@ JSON sem markdown:
   "slides": [
     {{"tipo_slide":"capa","titulo_slide":"TITULO","texto_slide":"texto.","foto_url":"url"}}
   ]
-}}"""
+}}""".format(
+        dominio=dados["dominio"],
+        fotos=fotos_str,
+        titulo=dados["titulo"],
+        texto=dados["texto"][:3000]
+    )
     r = requests.post(
         "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
         headers={"Content-Type": "application/json", "x-goog-api-key": GEMINI_API_KEY},
@@ -123,39 +128,53 @@ JSON sem markdown:
 def gerar_slide(slide, nome_artista, veiculo, idx, debug=False):
     tipo = slide.get("tipo_slide", "interno")
     tmpl = TEMPLATES.get(tipo, TEMPLATES["interno"])
-    tid = tmpl["id"]
-    lc = tmpl["layers"]
-    nome_veiculo = f"{nome_artista} + {veiculo}"
+    tid  = tmpl["id"]
+    lc   = tmpl["layers"]
+
+    nome_veiculo = "{} + {}".format(nome_artista, veiculo)
     titulo = remover_aspas(slide.get("titulo_slide", ""))
-    texto = slide.get("texto_slide", "")
-    foto = slide.get("foto_url", "")
-    layers = []
-    # IMAGEM: campo correto e "img_url" (descoberto via API do Layerre)
+    texto  = slide.get("texto_slide", "")
+    foto   = slide.get("foto_url", "")
+
+    # Layerre API correta: "overrides" com "layer_id" e "properties"
+    # Imagens: properties.img_url  |  Textos: properties.text
+    overrides = []
+
     if foto:
-        layers.append({"id": lc["foto"], "img_url": foto})
-    # TEXTOS: campo "value"
+        overrides.append({
+            "layer_id": lc["foto"],
+            "properties": {"img_url": foto}
+        })
+
     if tipo == "capa":
-        layers.append({"id": lc["nome_artista"], "value": nome_artista})
-        layers.append({"id": lc["titulo"],        "value": titulo})
-        layers.append({"id": lc["veiculo"],       "value": veiculo})
-        layers.append({"id": lc["logo_bpmat"],    "value": "#ImprensaBpmat"})
+        overrides.append({"layer_id": lc["nome_artista"], "properties": {"text": nome_artista}})
+        overrides.append({"layer_id": lc["titulo"],       "properties": {"text": titulo}})
+        overrides.append({"layer_id": lc["veiculo"],      "properties": {"text": veiculo}})
+        overrides.append({"layer_id": lc["logo_bpmat"],   "properties": {"text": "#ImprensaBpmat"}})
     else:
-        layers.append({"id": lc["titulo"],        "value": titulo})
-        layers.append({"id": lc["texto_slide"],   "value": texto})
-        layers.append({"id": lc["nome_veiculo"],  "value": nome_veiculo})
-        layers.append({"id": lc["logo_bpmat"],    "value": "#ImprensaBpmat"})
-    payload = {"name": f"slide_{idx:02d}", "layers": layers, "format": "png"}
+        overrides.append({"layer_id": lc["titulo"],       "properties": {"text": titulo}})
+        overrides.append({"layer_id": lc["texto_slide"],  "properties": {"text": texto}})
+        overrides.append({"layer_id": lc["nome_veiculo"], "properties": {"text": nome_veiculo}})
+        overrides.append({"layer_id": lc["logo_bpmat"],   "properties": {"text": "#ImprensaBpmat"}})
+
+    payload = {
+        "export_type": "png",
+        "overrides": overrides
+    }
+
     if debug:
-        st.write(f"**Payload slide {idx}:**")
+        st.write("**Payload slide {}:**".format(idx))
         st.json(payload)
+
     r = requests.post(
-        f"https://api.layerre.com/v1/template/{tid}/variant",
-        headers={"Authorization": f"Bearer {LAYERRE_API_KEY}", "Content-Type": "application/json"},
-        json=payload, timeout=60
+        "https://api.layerre.com/v1/template/{}/variant".format(tid),
+        headers={"Authorization": "Bearer {}".format(LAYERRE_API_KEY), "Content-Type": "application/json"},
+        json=payload,
+        timeout=60
     )
     if debug:
-        st.write(f"**Layerre resposta {idx} (status {r.status_code}):**")
         try:
+            st.write("**Layerre resposta slide {} (status {}):**".format(idx, r.status_code))
             st.json(r.json())
         except:
             st.write(r.text[:500])
@@ -163,14 +182,15 @@ def gerar_slide(slide, nome_artista, veiculo, idx, debug=False):
     data = r.json()
     img_url = data.get("url") or data.get("image_url") or data.get("output_url") or ""
     if not img_url and "outputs" in data:
-        img_url = data["outputs"][0].get("url","")
+        img_url = data["outputs"][0].get("url", "")
     return img_url
 
-# ── UI ──────────────────────────────────────────────────────────────────────
+# -- UI --
+
 st.set_page_config(page_title="Gerador de Carrossel - Bpmat", page_icon="v", layout="centered")
 
 st.markdown("""
-<div style="background:#5B2D8E;padding:24px 20px 18px;border-radius:12px;text-align:center;margin-bottom:24px">
+<div style="background:#5B2D8E;padding:24px 20px 18px;border-radius:12px;text-align:center;margin-bottom:8px">
   <h1 style="color:white;margin:0;font-size:1.8rem;font-weight:700">Gerador de Carrossel</h1>
   <p style="color:#e0c9ff;margin:6px 0 0;font-size:1rem">Assessoria Bpmat - Automacao de posts para Instagram</p>
 </div>
@@ -182,42 +202,55 @@ if not LAYERRE_API_KEY or not GEMINI_API_KEY:
 
 debug_mode = st.sidebar.checkbox("Modo debug (ver payloads)", value=False)
 
-link = st.text_input("Cole o link da noticia aqui:", placeholder="https://oglobo.globo.com/...")
-gerar = st.button("GERAR CARROSSEL", type="primary", use_container_width=True)
+with st.sidebar.expander("Inspecionar template"):
+    tid_insp = st.selectbox("Template", ["capa", "interno", "encerramento"])
+    if st.button("Inspecionar"):
+        tid = TEMPLATES[tid_insp]["id"]
+        resp = requests.get(
+            "https://api.layerre.com/v1/template/{}".format(tid),
+            headers={"Authorization": "Bearer {}".format(LAYERRE_API_KEY)}
+        )
+        st.json(resp.json())
 
-if gerar and link:
+url_input = st.text_input("Cole o link da noticia:", placeholder="https://...")
+gerar = st.button("Gerar Carrossel", type="primary", use_container_width=True)
+
+if gerar and url_input:
     with st.spinner("Extraindo noticia..."):
-        dados = extrair_noticia(link)
-    if not dados.get("titulo") and not dados.get("texto"):
-        st.error("Nao foi possivel extrair o conteudo. Verifique o link.")
+        dados = extrair_noticia(url_input)
+
+    if dados.get("erro"):
+        st.error("Erro ao acessar URL: {}".format(dados["erro"]))
         st.stop()
-    with st.expander("Noticia extraida", expanded=False):
-        st.write(f"Titulo: {dados["titulo"]}")
-        st.write(f"Dominio: {dados["dominio"]}")
-        st.write(f"Fotos: {len(dados["fotos"])}")
-        for i, f in enumerate(dados["fotos"]):
-            st.write(f"Foto {i+1}: {f[:100]}")
-    with st.spinner("Estruturando com Gemini AI..."):
+
+    if not dados.get("titulo") and not dados.get("texto"):
+        st.warning("Nao foi possivel extrair conteudo. Verifique se o link e publico.")
+        st.stop()
+
+    with st.spinner("Estruturando carrossel com Gemini..."):
         try:
             estrutura = estruturar_carrossel(dados)
         except Exception as e:
-            st.error(f"Erro Gemini: {e}")
+            st.error("Erro Gemini: {}".format(e))
             st.stop()
+
+    slides       = estrutura.get("slides", [])
     nome_artista = estrutura.get("nome_artista", "ARTISTA")
-    veiculo = estrutura.get("veiculo", dados["dominio"])
-    slides = estrutura.get("slides", [])
-    st.success(f"Carrossel estruturado: {len(slides)} slides para {nome_artista} - {veiculo}")
+    veiculo      = estrutura.get("veiculo", dados["dominio"])
+
+    st.success("Carrossel estruturado: {} slides para {} - {}".format(len(slides), nome_artista, veiculo))
     progress = st.progress(0, text="Gerando imagens...")
     imgs = []
     for i, slide in enumerate(slides):
-        progress.progress(i / len(slides), text=f"Gerando slide {i+1}/{len(slides)}...")
+        progress.progress(i / len(slides), text="Gerando slide {}/{}...".format(i+1, len(slides)))
         try:
             url = gerar_slide(slide, nome_artista, veiculo, i+1, debug=debug_mode)
-            imgs.append((i+1, slide.get("tipo_slide",""), url))
+            imgs.append((i+1, slide.get("tipo_slide", ""), url))
         except Exception as e:
-            st.warning(f"Erro slide {i+1}: {e}")
+            st.warning("Erro slide {}: {}".format(i+1, e))
         time.sleep(0.5)
     progress.progress(1.0, text="Concluido!")
+
     st.markdown("---")
     st.subheader("Slides gerados")
     cols = st.columns(min(len(imgs), 3))
@@ -225,12 +258,10 @@ if gerar and link:
         col = cols[i % len(cols)]
         with col:
             if url:
-                st.image(url, caption=f"Slide {num} - {tipo}", use_container_width=True)
-                st.markdown(f"[Baixar slide {num}]({url})")
+                st.image(url, caption="Slide {} - {}".format(num, tipo), use_container_width=True)
+                st.markdown("[Baixar slide {}]({})".format(num, url))
             else:
-                st.error(f"Slide {num}: erro")
+                st.error("Slide {}: erro".format(num))
     if imgs:
         st.markdown("---")
-        st.info("Clique nos links acima para baixar e postar no Instagram!")
-elif gerar and not link:
-    st.warning("Cole o link antes de gerar.")
+        st.info("Clique nos links acima para baixar cada post individualmente.")
