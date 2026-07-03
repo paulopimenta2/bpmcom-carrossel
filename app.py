@@ -265,9 +265,3 @@ if gerar and url_input:
     if imgs:
         st.markdown("---")
         st.info("Clique nos links acima para baixar cada post individualmente.")
-
-      
-        
-      
-      Stop Claude
-    
